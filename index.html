@@ -1,0 +1,539 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Crypto Timeline – Live Bubbles (No API Keys)</title>
+<!-- Chart.js CDN (for price chart) -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.2/dist/chart.umd.min.js"></script>
+<style>
+  :root{
+    --h: 560px;
+    --pad: 80px;
+    --ui: #0ea5e9;         /* theme accent (changes via theme circles) */
+    --ui-ink: #0b1320;
+    --bg: #eef2f3;
+    --card: #ffffff;
+    --muted: #6b7280;
+    --line: #cbd5e1;
+    --good: #10b981;
+    --bad:  #ef4444;
+    --bull-bg: #e9f8ef;    /* timeline top */
+    --bear-bg: #ffe9ea;    /* timeline bottom */
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Inter,Roboto,system-ui,sans-serif;background:var(--bg);color:#111827}
+  header{
+    position:sticky;top:0;z-index:40;display:flex;align-items:center;justify-content:space-between;gap:12px;
+    padding:10px 14px;background:rgba(255,255,255,.9);backdrop-filter:saturate(1.05) blur(6px);border-bottom:1px solid #e5e7eb
+  }
+  .left,.right{display:flex;gap:10px;align-items:center}
+  .brand{font-weight:800;letter-spacing:.2px}
+  .pill{padding:7px 10px;border:1px solid #d1d5db;border-radius:10px;background:#fff}
+  .pill.active{background:var(--ui);border-color:var(--ui);color:#fff}
+  .search{display:flex;gap:8px;align-items:center}
+  .search input{width:260px;padding:10px 12px;border:1px solid #d1d5db;border-radius:12px;outline:none}
+  .btn{padding:10px 12px;border:1px solid #d1d5db;border-radius:12px;background:#fff;cursor:pointer}
+  .btn.primary{background:var(--ui);border-color:var(--ui);color:#fff}
+
+  .theme-dot{width:20px;height:20px;border-radius:50%;border:2px solid #e5e7eb;cursor:pointer;display:inline-block}
+  .theme-dot.active{outline:2px solid var(--ui)}
+  .dot-blue{background:#0ea5e9}
+  .dot-green{background:#22c55e}
+  .dot-purple{background:#a855f7}
+  .dm-btn{width:36px;height:36px;border-radius:999px;border:1px solid #d1d5db;background:#fff;display:grid;place-items:center;cursor:pointer}
+  .dm-btn span{font-size:18px}
+
+  .progress-top{position:absolute;left:0;right:0;bottom:-2px;height:3px;background:#e5e7eb;overflow:hidden;border-radius:2px}
+  .progress-bar{width:0%;height:100%;background:linear-gradient(90deg,var(--ui),#3b82f6);transition:width .25s ease}
+
+  .grid{display:grid;grid-template-columns:360px 1fr 240px;gap:16px;padding:16px}
+  .card{background:var(--card);border:1px solid #e5e7eb;border-radius:16px;box-shadow:0 1px 8px rgba(0,0,0,.05)}
+  .card .inner{padding:16px}
+
+  .muted{color:var(--muted);font-size:12px}
+  .kpi{display:flex;justify-content:space-between;padding:6px 0;font-size:14px}
+  .good{color:var(--good)} .bad{color:var(--bad)}
+  .summary{background:#f9fafb;border:1px dashed #e5e7eb;border-radius:12px;padding:10px;font-size:13px;color:#374151}
+
+  /* timeline */
+  .tl{position:relative;overflow:hidden;height:var(--h)}
+  .split{position:absolute;inset:0;display:grid;grid-template-rows:1fr 1fr;pointer-events:none}
+  .split .up{background:var(--bull-bg)} .split .down{background:var(--bear-bg)}
+  .center-line{position:absolute;left:0;right:0;height:2px;background:var(--line);transition:top .25s ease}
+  .canvas-wrap{position:absolute;inset:0}
+  .overlay{position:absolute;inset:0;pointer-events:none}
+
+  .sent-box{position:absolute;right:12px;text-align:center}
+  .sent-box .lbl{font-size:11px;color:#6b7280}
+  .sent-box .val{font-size:34px;font-weight:800;margin-top:2px}
+  .bull{top:10px} .bear{bottom:10px}
+  .bull .val{color:var(--good)} .bear .val{color:var(--bad)}
+
+  /* bubble layer */
+  .col{position:absolute;top:0;bottom:0;transform:translateX(-50%);pointer-events:none}
+  .vline{position:absolute;width:2px;background:var(--line)}
+  .dateTag{position:absolute;transform:translate(-50%,-50%);top:0;left:50%;padding:3px 6px;border:1px solid #e5e7eb;background:var(--card);border-radius:6px;font-size:10px;color:#374151;white-space:nowrap;box-shadow:0 1px 4px rgba(0,0,0,.06)}
+
+  .bubble{position:absolute;left:50%;transform:translate(-50%,0);border-radius:999px;display:grid;place-items:center;color:#fff;
+          box-shadow:0 10px 22px rgba(0,0,0,.18);user-select:none;transition:transform .2s ease, box-shadow .2s ease;pointer-events:auto;overflow:hidden}
+  .bubble:hover{transform:translate(-50%,0) scale(1.06);box-shadow:0 14px 28px rgba(0,0,0,.22)}
+  .bullB{background:linear-gradient(145deg,#16a34a,#065f46)} .bearB{background:linear-gradient(145deg,#ef4444,#991b1b)} .neuB{background:linear-gradient(145deg,#9ca3af,#6b7280)}
+
+  .bubble img.thumb{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;opacity:.25;filter:grayscale(15%)}
+  .btxt{position:relative;font-size:11px;font-weight:800;text-shadow:0 1px 3px rgba(0,0,0,.35)}
+
+  .bubble.top3{outline:3px solid gold;outline-offset:2px}
+
+  /* tooltip */
+  .tip{position:absolute;z-index:30;background:var(--card);color:#111827;border:1px solid #e5e7eb;border-radius:10px;padding:8px 10px;
+        box-shadow:0 8px 24px rgba(0,0,0,.15);width:280px;font-size:12px;display:none}
+  .tip .src{color:#64748b;font-size:11px;margin-top:4px}
+
+  /* overlay loader for search */
+  .overlay-loader{position:fixed;inset:0;background:rgba(255,255,255,.85);backdrop-filter:blur(3px);display:none;align-items:center;justify-content:center;flex-direction:column;gap:10px;z-index:50}
+  .bar{width:360px;height:8px;background:#e5e7eb;border-radius:999px;overflow:hidden}
+  .bar>div{width:0%;height:100%;background:linear-gradient(90deg,var(--ui),#3b82f6);transition:width .25s ease}
+  .overlay-loader .txt{font-size:13px;color:#374151}
+
+  /* dark mode */
+  @media (prefers-color-scheme: dark){
+    body{background:#0b0e13;color:#e5e7eb}
+    header{background:rgba(12,14,19,.82);border-bottom-color:#1f2937}
+    .search input,.btn,.pill{background:#0f131a;border-color:#273244;color:#e5e7eb}
+    .dm-btn{background:#0f131a;border-color:#273244;color:#e5e7eb}
+    .card{background:#0f131a;border-color:#1f2937}
+    .summary{background:#0b0e13;border-color:#1f2937;color:#cbd5e1}
+    .center-line,.vline{background:#334155}
+    .dateTag{background:#0f131a;border-color:#273244;color:#cbd5e1}
+    .split .up{background:#0c2016}.split .down{background:#2a0d12}
+    .tip{background:#0f131a;border-color:#273244;color:#e5e7eb}
+    .overlay-loader{background:rgba(8,10,14,.72)}
+  }
+</style>
+</head>
+<body>
+<header>
+  <div class="left">
+    <div class="brand">📊 Crypto Timeline</div>
+    <div class="search">
+      <input id="coinInput" placeholder="Search coin (e.g., bitcoin, ethereum, solana)" />
+      <button class="btn primary" id="loadBtn" title="Load coin">Load</button>
+    </div>
+    <div id="presetBar">
+      <button class="pill active" data-days="7">1W</button>
+      <button class="pill" data-days="30">1M</button>
+      <button class="pill" data-days="90">3M</button>
+    </div>
+  </div>
+  <div class="right">
+    <div class="theme-dot dot-blue active" title="Blue" data-theme="blue"></div>
+    <div class="theme-dot dot-green" title="Green" data-theme="green"></div>
+    <div class="theme-dot dot-purple" title="Purple" data-theme="purple"></div>
+    <button class="dm-btn" id="dmBtn" title="Toggle dark mode"><span>🌙</span></button>
+    <div class="progress-top"><div id="topProgress" class="progress-bar"></div></div>
+  </div>
+</header>
+
+<div class="grid">
+  <!-- Left: info + summary -->
+  <div class="card"><div class="inner">
+    <div id="coinTitle" style="font-weight:800;font-size:18px;margin-bottom:6px">Bitcoin (BTC)</div>
+    <div class="muted" style="margin-bottom:10px">Open sources • CoinGecko + Google News RSS</div>
+    <div id="stats">Loading…</div>
+    <div style="height:8px"></div>
+    <div class="summary" id="summaryBox">Summary will appear after data loads…</div>
+    <div style="height:10px"></div>
+    <div class="summary" id="top3Box">Top 3 impactful headlines will appear here…</div>
+  </div></div>
+
+  <!-- Center: timeline -->
+  <div class="card tl" id="timeline">
+    <div class="split"><div class="up"></div><div class="down"></div></div>
+    <div class="canvas-wrap"><canvas id="priceChart"></canvas></div>
+    <div class="center-line" id="centerLine"></div>
+    <div class="overlay" id="bubbleLayer"></div>
+    <div class="sent-box bull"><div class="lbl">Bullish</div><div class="val" id="bullPct">0%</div></div>
+    <div class="sent-box bear"><div class="lbl">Bearish</div><div class="val" id="bearPct">0%</div></div>
+    <div class="tip" id="tooltip"></div>
+  </div>
+
+  <!-- Right: helper -->
+  <div class="card"><div class="inner">
+    <div style="font-weight:700">Tips</div>
+    <div class="muted" style="margin-top:6px">Click a bubble to open the article. Hover shows source & date. Max 20 bubbles per view.</div>
+    <div class="muted" style="margin-top:10px" id="pageInfo"></div>
+  </div></div>
+</div>
+
+<!-- Overlay loader (also used for coin search) -->
+<div class="overlay-loader" id="overlayLoader" aria-live="polite">
+  <div class="bar"><div id="overlayFill"></div></div>
+  <div class="txt" id="overlayTxt">Loading…</div>
+</div>
+
+<script>
+(() => {
+  // ======= THEME / DARK MODE =======
+  const root = document.documentElement;
+  const themeDots = document.querySelectorAll('.theme-dot');
+  const dmBtn = document.getElementById('dmBtn');
+  const savedTheme = localStorage.getItem('ct_theme') || 'blue';
+  const savedDM = localStorage.getItem('ct_dm') || 'auto'; // 'auto' | 'dark' | 'light'
+
+  function setTheme(name){
+    themeDots.forEach(d => d.classList.toggle('active', d.dataset.theme === name));
+    if(name==='blue'){ root.style.setProperty('--ui', '#0ea5e9'); root.style.setProperty('--ui-ink','#0b1320'); }
+    if(name==='green'){ root.style.setProperty('--ui', '#22c55e'); root.style.setProperty('--ui-ink','#06240f'); }
+    if(name==='purple'){ root.style.setProperty('--ui', '#a855f7'); root.style.setProperty('--ui-ink','#1b0b2b'); }
+    localStorage.setItem('ct_theme', name);
+  }
+  setTheme(savedTheme);
+  themeDots.forEach(d => d.addEventListener('click', () => setTheme(d.dataset.theme)));
+
+  function setDM(mode){
+    // mode: 'dark' 'light' 'auto' (we let CSS media query handle colors)
+    localStorage.setItem('ct_dm', mode);
+    // purely cosmetic icon toggle
+    dmBtn.querySelector('span').textContent = mode === 'dark' ? '☀️' : '🌙';
+  }
+  setDM(savedDM);
+  dmBtn.addEventListener('click', () => setDM(localStorage.getItem('ct_dm')==='dark' ? 'light' : 'dark'));
+
+  // ======= ELEMENTS =======
+  const coinInput = document.getElementById('coinInput');
+  const loadBtn = document.getElementById('loadBtn');
+  const presetBar = document.getElementById('presetBar');
+  const topProgress = document.getElementById('topProgress');
+  const overlay = document.getElementById('overlayLoader');
+  const overlayFill = document.getElementById('overlayFill');
+  const overlayTxt = document.getElementById('overlayTxt');
+
+  const statsBox = document.getElementById('stats');
+  const summaryBox = document.getElementById('summaryBox');
+  const top3Box = document.getElementById('top3Box');
+  const coinTitle = document.getElementById('coinTitle');
+  const bullPct = document.getElementById('bullPct');
+  const bearPct = document.getElementById('bearPct');
+  const pageInfo = document.getElementById('pageInfo');
+  const bubbleLayer = document.getElementById('bubbleLayer');
+  const centerLine = document.getElementById('centerLine');
+  const tooltip = document.getElementById('tooltip');
+
+  // ======= STATE =======
+  let coinList = null, coinId = 'bitcoin', coinSymbol = 'BTC', coinName = 'Bitcoin';
+  let days = 30; // default 1M
+  let chart, chartData = [];
+  let newsPages = [[]]; // chunked by 20
+  let aborter = null;
+
+  // ======= HELPERS =======
+  const cap = s => s.charAt(0).toUpperCase() + s.slice(1);
+  const fmt = v => (v==null?'—': v>1e12?(v/1e12).toFixed(2)+'T': v>1e9?(v/1e9).toFixed(2)+'B': v>1e6?(v/1e6).toFixed(2)+'M': (Math.round(v*100)/100).toLocaleString());
+  const setTopProgress = (p) => topProgress.style.width = p + '%';
+  const showOverlay = (txt='Loading…') => { overlay.style.display='flex'; overlayTxt.textContent = txt; overlayFill.style.width='0%'; };
+  const overlayStep = (pct, txt) => { overlayFill.style.width = pct + '%'; if(txt) overlayTxt.textContent = txt; };
+  const hideOverlay = () => overlay.style.display='none';
+  const timeout = (ms) => new Promise((_,rej)=>setTimeout(()=>rej(new Error('timeout')), ms));
+  const withTimeout = (p, ms=12000) => Promise.race([p, timeout(ms)]);
+
+  function chunk(arr, size){ const out=[]; for(let i=0;i<arr.length;i+=size) out.push(arr.slice(i,i+size)); return out; }
+  function sentimentScore(text){
+    const t=text.toLowerCase();
+    const pos=['surge','record','approve','partnership','adopt','rally','up','bull','funding','launch','growth','wins','milestone','support','integration','buy','adds','builds','expands','investment','backed','approve'];
+    const neg=['hack','ban','fall','plunge','lawsuit','probe','halt','outage','exploit','scam','bear','crash','dump','delay','bug','vulnerability','withdraws','investigation','charges','sell-off'];
+    let s=0; pos.forEach(k=>{if(t.includes(k)) s+=1}); neg.forEach(k=>{if(t.includes(k)) s-=1}); return s;
+  }
+  function relScore(item, ageDays){
+    const recency = Math.max(0, 1 - ageDays/days); // 0..1
+    const sent = Math.min(1, Math.abs(item.sent)/3);
+    const src = /coindesk|cointelegraph|theblock|decrypt|reuters|bloomberg|wsj|ft\.com/.test((item.domain||'').toLowerCase())?1:0.7;
+    return 0.5*recency + 0.35*sent + 0.15*src;
+  }
+  function consensusFrom(item){
+    const sent=Math.min(1, Math.abs(item.sent)/3);
+    const src=/coindesk|cointelegraph|theblock|reuters|bloomberg|ft\.com/.test((item.domain||'').toLowerCase())?0.8:0.5;
+    return Math.max(0.2, Math.min(1, 0.45*sent + 0.55*src));
+  }
+
+  // ======= DATA LOADERS =======
+  async function ensureCoinList(){
+    if(coinList) return coinList;
+    setTopProgress(5);
+    const r = await withTimeout(fetch('https://api.coingecko.com/api/v3/coins/list?include_platform=false'));
+    coinList = await r.json();
+    return coinList;
+  }
+  function findCoin(q){
+    if(!coinList) return null;
+    const x = coinList.find(c=>c.id===q||c.symbol===q||c.name.toLowerCase()===q);
+    if(x) return x;
+    return coinList.find(c=>c.name.toLowerCase().includes(q)||c.symbol===q);
+  }
+
+  async function loadPrices(){
+    setTopProgress(15);
+    const url = `https://api.coingecko.com/api/v3/coins/${coinId}/market_chart?vs_currency=usd&days=${days}`;
+    const r = await withTimeout(fetch(url));
+    const data = await r.json();
+    const prices = data.prices || []; // [ms, price]
+    chartData = prices.map(p => ({ t: p[0], y: p[1] }));
+    setTopProgress(35);
+
+    // Update chart
+    const ctx = document.getElementById('priceChart').getContext('2d');
+    if(chart){ chart.destroy(); }
+    chart = new Chart(ctx, {
+      type: 'line',
+      data: { datasets: [{
+        label: `${cap(coinName)} price (USD)`,
+        data: chartData,
+        parsing: { xAxisKey: 't', yAxisKey: 'y' },
+        borderColor: '#0f172a',
+        borderWidth: 2,
+        pointRadius: 0,
+        tension: 0.25,
+      }]},
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        scales: {
+          x: { type: 'time', time: { unit: days<=7?'day':'week' }, grid: { display:false }},
+          y: { ticks: { callback:(v)=>'$'+v.toLocaleString() }, grid: { color:'rgba(148,163,184,.25)' } }
+        },
+        plugins: { legend: { display:false }, tooltip: { enabled:false } }
+      }
+    });
+
+    // KPIs
+    const first = prices[0]?.[1]; const last = prices.at(-1)?.[1];
+    const change = (first && last) ? ((last-first)/first)*100 : 0;
+    const stats = `
+      <div class="kpi"><span>Price</span><strong>$${fmt(last)}</strong></div>
+      <div class="kpi"><span>Change (${days===7?'1W':days===30?'1M':'3M'})</span>
+        <strong class="${change>=0?'good':'bad'}">${(change||0).toFixed(2)}%</strong></div>
+      `;
+    statsBox.innerHTML = stats;
+    return { first, last, change };
+  }
+
+  function parseRSSItems(txt){
+    const items=[]; const re=/<item>([\s\S]*?)<\/item>/gi; let m;
+    function get(block, tag){
+      const r=new RegExp(`<${tag}[^>]*>([\\s\\S]*?)<\\/${tag}>`,'i'); const mm=r.exec(block);
+      return mm? mm[1].replace(/<!\[CDATA\[(.*?)\]\]>/g,'$1').trim(): '';
+    }
+    while((m=re.exec(txt))){
+      const b=m[1]; const title=get(b,'title'); const link=get(b,'link'); const pub=get(b,'pubDate'); const src=get(b,'source');
+      if(title && link){ items.push({title, link, pub_ms: pub? Date.parse(pub):Date.now(), domain: src || (link.includes('http')? new URL(link).hostname.replace('www.',''):'')}); }
+    }
+    return items;
+  }
+
+  async function loadNews(){
+    setTopProgress(55);
+    // Google News RSS via r.jina.ai
+    const q = encodeURIComponent(`${coinName} OR ${coinSymbol} cryptocurrency when:${days}d`);
+    const prox = `https://r.jina.ai/http://news.google.com/rss/search?q=${q}&hl=en-US&gl=US&ceid=US:en`;
+
+    let items=[];
+    try{
+      const r = await withTimeout(fetch(prox), 12000);
+      const txt = await r.text();
+      items = parseRSSItems(txt);
+    }catch(e){
+      // fallback: CryptoPanic public
+      try{
+        const r2 = await withTimeout(fetch('https://cryptopanic.com/api/v1/posts/?public=true'), 12000);
+        const data = await r2.json();
+        items = (data.results||[]).map(x=>({title:x.title||'', link:x.url||'', pub_ms:x.published_at?Date.parse(x.published_at):Date.now(), domain:(x.domain||'')}));
+      }catch(e2){
+        // last fallback: small demo
+        const now=Date.now();
+        items = [
+          {title:`${coinName} adoption rises with new integration`, link:'https://www.coindesk.com/', pub_ms: now-2*86400000, domain:'coindesk.com'},
+          {title:`Major exchange outage impacts ${coinSymbol}`, link:'https://www.cointelegraph.com/', pub_ms: now-5*86400000, domain:'cointelegraph.com'},
+          {title:`Institutional inflows support ${coinName} rally`, link:'https://www.reuters.com/', pub_ms: now-9*86400000, domain:'reuters.com'},
+        ];
+      }
+    }
+
+    // Enrich, rank, cap 20
+    const startMs = Date.now() - days*86400000;
+    const enriched = items
+      .filter(x => x.pub_ms >= startMs)
+      .map(x => {
+        const sent = sentimentScore(x.title);
+        const ageDays = (Date.now()-x.pub_ms)/(86400000);
+        const rel = relScore({sent, domain:x.domain}, ageDays);
+        const cons = consensusFrom({sent, domain:x.domain});
+        return { ...x, sent, rel, cons };
+      })
+      .sort((a,b)=> b.rel - a.rel);
+
+    newsPages = chunk(enriched, 20);
+    if(newsPages.length===0) newsPages=[[]];
+    setTopProgress(75);
+  }
+
+  // ======= RENDER =======
+  function faviconFor(domain){
+    if(!domain) return '';
+    return `https://www.google.com/s2/favicons?domain=${encodeURIComponent(domain)}&sz=64`;
+  }
+  function thumbFor(domain){ return faviconFor(domain); } // safe fallback
+
+  function setSentimentPerc(items){
+    const bull = items.filter(n=>n.sent>0).length;
+    const bear = items.filter(n=>n.sent<0).length;
+    const total = bull+bear;
+    bullPct.textContent = (total? Math.round(bull/total*100):0)+'%';
+    bearPct.textContent = (total? Math.round(bear/total*100):0)+'%';
+  }
+  function centerShift(items){
+    const bull=items.filter(n=>n.sent>0).length, bear=items.filter(n=>n.sent<0).length;
+    const total=Math.max(1,bull+bear);
+    return ((bear-bull)/total)*60; // px (down if more bear)
+  }
+  function pxForTime(ms){
+    // use chart scale
+    return chart.scales.x.getPixelForValue(ms);
+  }
+
+  function renderBubbles(){
+    bubbleLayer.innerHTML='';
+    const items = (newsPages[0]||[]).slice(0,20).sort((a,b)=> a.pub_ms - b.pub_ms);
+    setSentimentPerc(items);
+
+    const h = document.getElementById('timeline').clientHeight;
+    const cY = h/2 + centerShift(items);
+    centerLine.style.top = cY + 'px';
+
+    // Build Top 3 box
+    const top3 = [...items].sort((a,b)=> b.rel - a.rel).slice(0,3);
+    top3Box.innerHTML = '<strong>Top 3 impactful headlines</strong><ol style="margin:6px 0 0 18px;padding:0">'
+      + top3.map(n=>`<li><a href="${n.link}" target="_blank" rel="noopener">${n.title}</a> <span class="muted">(${n.domain})</span></li>`).join('') + '</ol>';
+
+    // Draw each bubble + vertical line + date tag
+    items.forEach((n, idx) => {
+      const x = pxForTime(n.pub_ms);
+      const consensus = Math.max(.2, Math.min(1, n.cons));
+      const dist = 30 + consensus*170;
+      const y = n.sent>0 ? cY - dist : n.sent<0 ? cY + dist : cY;
+      const size = 22 + Math.min(1, Math.max(0, n.rel))*48;
+
+      // column container
+      const col = document.createElement('div'); col.className='col'; col.style.left = x + 'px';
+
+      // vertical line
+      const v = document.createElement('div'); v.className='vline';
+      v.style.top = Math.min(cY, y)+'px'; v.style.height=Math.abs(cY-y)+'px'; v.style.left='50%'; v.style.transform='translateX(-50%)';
+
+      // date tag on center line
+      const tag = document.createElement('div'); tag.className='dateTag'; tag.style.top=cY+'px'; tag.textContent=new Date(n.pub_ms).toLocaleDateString();
+
+      // bubble
+      const b = document.createElement('div');
+      b.className = 'bubble ' + (n.sent>0?'bullB':n.sent<0?'bearB':'neuB') + (top3.includes(n)? ' top3':'');
+      b.style.width=size+'px'; b.style.height=size+'px'; b.style.top=(y - size/2)+'px';
+      b.title = n.title;
+      b.addEventListener('click', ()=> window.open(n.link,'_blank','noopener'));
+
+      // thumbnail (favicon as safe image)
+      const img = document.createElement('img'); img.className='thumb'; img.src = thumbFor(n.domain); img.alt='';
+      b.appendChild(img);
+
+      const t = document.createElement('div'); t.className='btxt'; t.textContent = Math.round(50 + n.rel*50);
+      b.appendChild(t);
+
+      // tooltip
+      b.addEventListener('mouseenter', (e)=>{
+        tooltip.style.display='block';
+        tooltip.style.left = (e.pageX+12)+'px';
+        tooltip.style.top = (e.pageY-10)+'px';
+        tooltip.innerHTML = `<strong>${n.title}</strong><div class="src">${n.domain || ''} • ${new Date(n.pub_ms).toLocaleString()}</div>`;
+      });
+      b.addEventListener('mouseleave', ()=> tooltip.style.display='none');
+
+      col.appendChild(v); col.appendChild(tag); col.appendChild(b); bubbleLayer.appendChild(col);
+    });
+
+    pageInfo.textContent = `Showing ${Math.min(20,(newsPages[0]||[]).length)} of ${(newsPages[0]||[]).length} items`;
+  }
+
+  function writeSummary(kpi){
+    const first = kpi.first, last = kpi.last, change = kpi.change||0;
+    const items = (newsPages[0]||[]);
+    const bull = items.filter(n=>n.sent>0).length, bear=items.filter(n=>n.sent<0).length;
+    summaryBox.innerHTML = `
+      <div><strong>${coinName}</strong> moved <strong class="${change>=0?'good':'bad'}">${(change||0).toFixed(2)}%</strong> over the last <strong>${days===7?'1W':days===30?'1M':'3M'}</strong>.</div>
+      <div>News mix (visible): <strong>${bull}</strong> bullish / <strong>${bear}</strong> bearish.</div>
+      <div class="muted">Bubble size = relevance • distance = consensus • above/below = bull/bear.</div>
+    `;
+  }
+
+  // ======= MAIN LOAD PIPELINE =======
+  async function loadAll(){
+    try{
+      setTopProgress(2);
+      const list = await ensureCoinList();
+
+      // Prices
+      const kpi = await loadPrices();
+
+      // News
+      await loadNews();
+
+      // Render
+      setTopProgress(90);
+      renderBubbles();
+      writeSummary(kpi);
+      setTopProgress(100);
+    }catch(e){
+      console.error(e);
+      topProgress.style.background = '#ef4444';
+    }
+  }
+
+  // ======= EVENTS =======
+  presetBar.addEventListener('click', (e)=>{
+    const btn = e.target.closest('button[data-days]');
+    if(!btn) return;
+    [...presetBar.querySelectorAll('button')].forEach(b=>b.classList.remove('active'));
+    btn.classList.add('active');
+    days = parseInt(btn.dataset.days,10);
+    showOverlay('Loading range…');
+    overlayStep(10);
+    loadAll().then(()=>{ overlayStep(100,'Done'); setTimeout(hideOverlay,400); });
+  });
+
+  loadBtn.addEventListener('click', async ()=>{
+    const q = (coinInput.value||'').trim().toLowerCase();
+    if(!q) return;
+    showOverlay('Searching coin…'); overlayStep(8);
+    try{
+      await ensureCoinList(); overlayStep(25,'Resolving coin…');
+      const match = findCoin(q);
+      if(!match) { overlayStep(100,'Not found'); setTimeout(hideOverlay,400); alert('Coin not found. Try "bitcoin", "ethereum", "solana".'); return; }
+      coinId = match.id; coinSymbol = match.symbol.toUpperCase(); coinName = cap(match.name);
+      coinTitle.textContent = `${coinName} (${coinSymbol})`;
+      overlayStep(45,'Loading price…');
+      const kpi = await loadPrices();
+      overlayStep(70,'Loading news…');
+      await loadNews();
+      overlayStep(90,'Rendering…');
+      renderBubbles(); writeSummary(kpi);
+      overlayStep(100,'Done');
+    }catch(err){
+      console.error(err); overlayTxt.textContent='Error while loading. Please try again.'; overlayFill.style.background='#ef4444';
+    }finally{
+      setTimeout(hideOverlay, 500);
+    }
+  });
+
+  // ======= INIT =======
+  loadAll();
+})();
+</script>
+</body>
+</html>
